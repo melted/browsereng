@@ -1,1 +1,1 @@
-Doing the Browser engineering tutorial in Standard ML.
+Working through the [Web Browser Engineering book](https://browser.engineering/index.html) in Standard ML.

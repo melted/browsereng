@@ -1,3 +1,5 @@
+$(SML_LIB)/basis/basis.mlb
+
 ann "allowFFI true" in
   ./main.sml
 end
