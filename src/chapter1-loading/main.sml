@@ -7,6 +7,54 @@ val () = print (Word32.toString a)
 *)
 
 exception NoRoute
+exception NoParse
+
+datatype Url = Url of {
+    raw : string,
+    scheme : substring,
+    user : substring option,
+    host : substring option,
+    port : substring option,
+    path : substring,
+    query : substring option,
+    fragment : substring option
+}
+
+
+fun nonEmpty sub = if Substring.size sub > 0 then SOME sub else NONE
+fun parseUrl str =
+    let
+        val (scheme, rest)= Substring.position "://" (Substring.full str)
+        val (authority, rest) =  Substring.position "/" rest
+        val (path, rest) = Substring.position "?" rest
+        val (path, (query, fragment)) = if Substring.size rest > 0
+            then (path, Substring.position "#" rest)
+            else let val (p, f) = Substring.position "#" path in (p, (Substring.full "", f)) end
+        val (user, host) = let
+                val (u, h) = Substring.position "@" authority
+            in
+                if Substring.size h > 0 then (u, h) else (Substring.full "", u)
+            end
+        val (host, port) = Substring.position ":" host
+    in
+        Url {
+            raw = str,
+            scheme = scheme,
+            user = nonEmpty user,
+            host = nonEmpty host,
+            port = nonEmpty port,
+            path = path,
+            query = nonEmpty query,
+            fragment = nonEmpty fragment
+        }
+    end
+
+fun dumpUrl (Url x) =
+    let
+        fun optPrint (SOME str)= print (Substring.string str) |
+            optPrint NONE = print "<empty>"
+        val _ = print ("scheme: " ^ (Substring.string (#scheme x)))
+    in () end
 
 fun createConnection hostName =
     let 
@@ -58,3 +106,9 @@ fun request host path =
 val page = request "example.org" "/"
 
 val _ = print page
+
+val Url x = parseUrl "http://example.org/hello#frag"
+
+val scheme = Substring.string (#scheme x)
+
+val _ = print scheme
