@@ -1,4 +1,4 @@
-$(SML_LIB)/basis/basis.mlb
+$(SML_LIB)/basis/default.mlb
 
 ann "allowFFI true" in
   ./main.sml
