@@ -6,7 +6,7 @@ datatype Url = Url of {
     scheme : substring,
     user : substring option,
     host : substring option,
-    port : substring option,
+    port : int option,
     path : substring,
     query : substring option,
     fragment : substring option
@@ -15,31 +15,43 @@ datatype Url = Url of {
 fun split on str =
     let val (l, r) = Substring.position on str in (l, Substring.triml (size on) r) end
 
+fun splitInOrder splitters str =
+    let
+        fun worker _ acc NONE = rev acc
+            | worker [] acc (SOME rest) = rev (rest::acc)
+            | worker remaining acc (SOME slc) =
+                let
+                    val emptySlice = CharVectorSlice.full (CharVector.fromList []) 
+                    fun pred (i, e) = List.exists (fn x => x = e) remaining
+                    val (remaining, acc, rest) =
+                        case CharVectorSlice.findi pred slc of
+                            NONE => ([], (List.map (fn _ => emptySlice) remaining)@slc::acc, NONE)
+                            | SOME (idx, elem) =>
+                                let
+                                    fun go [] _ = raise Empty
+                                        | go (x::xs) a = if x = elem then (xs, (CharVectorSlice.subslice (slc, 0, SOME idx))::a, SOME (CharVectorSlice.subslice (slc, idx+1, NONE))) else go xs (emptySlice::a)
+                                in go remaining acc end
+                in
+                    worker remaining acc rest
+                end
+    in worker splitters [] (SOME str) end
+
 fun nonEmpty sub = if Substring.size sub > 0 then SOME sub else NONE
+
 fun parseUrl str =
     let
         open Substring
         val (scheme, rest)= split "://" (full str)
-        val (authority, rest) =  position "/" rest
-        val rest = if size rest = 0 then full "/" else rest
-        val (path, rest) = split "?" rest
-        val (path, (query, fragment)) = if Substring.size rest > 0
-            then (path, split "#" rest)
-            else let val (p, f) = split "#" path in (p, (full "", f)) end
-        val (user, host) = let
-                val (u, h) = split "@" authority
-            in
-                if Substring.size h > 0 then (u, h) else (Substring.full "", u)
-            end
-        val (host, port) = split ":" host
+        val [authority, path, query, fragment] = splitInOrder [#"/", #"?", #"#"] rest
+        val [user, host, port] = splitInOrder [#"@", #":"] authority
     in
         Url {
             raw = str,
             scheme = scheme,
             user = nonEmpty user,
             host = nonEmpty host,
-            port = nonEmpty port,
-            path = path,
+            port = Option.join (Option.map (Int.fromString o Substring.string) (nonEmpty port)),
+            path = Substring.full ("/" ^ Substring.string path),
             query = nonEmpty query,
             fragment = nonEmpty fragment
         }
@@ -50,7 +62,7 @@ fun urlPath (Url u) = Substring.string (#path u)
 fun urlString (Url u) = #raw u
 fun urlUser (Url u) = Substring.string (Option.getOpt (#user u, Substring.full ""))
 fun urlHost (Url u) = Substring.string (Option.getOpt (#host u, Substring.full ""))
-fun urlPort (Url u) = Substring.string (Option.getOpt (#port u, Substring.full ""))
+fun urlPort (Url u) = #port u
 fun urlQuery (Url u) = Substring.string (Option.getOpt (#query u, Substring.full ""))
 fun urlFragment (Url u) = Substring.string (Option.getOpt (#fragment u, Substring.full ""))
 
@@ -66,7 +78,7 @@ fun dumpUrl (Url x) =
         val _ = print (", host: ")
         val _ = optPrint (#host x)
         val _ = print (", port: ")
-        val _ = optPrint (#port x)
+        val _ = print (Option.getOpt (Option.map Int.toString (#port x), "<empty>"))
         val _ = print (", path: " ^ (Substring.string (#path x)))
         val _ = print (", query: ")
         val _ = optPrint (#query x)
@@ -74,7 +86,7 @@ fun dumpUrl (Url x) =
         val _ = optPrint (#fragment x)
     in print ")\n" end
 
-fun createConnection hostName =
+fun createConnection hostName port =
     let 
         (* Look up the host name *)
         val e = NetHostDB.getByName hostName
@@ -86,7 +98,7 @@ fun createConnection hostName =
         val ip = NetHostDB.addr (valOf e)
 
         (* Add port for a socket address*)
-        val sa = INetSock.toAddr (ip, 80)
+        val sa = INetSock.toAddr (ip, port)
 
         val socket = INetSock.TCP.socket ()
 
@@ -145,20 +157,30 @@ fun parseResponse resp =
 fun request urlStr = 
     let 
         val url = parseUrl urlStr
-        val s = createConnection (urlHost url)
+        val isHttps = urlScheme url = "https"
+        val defaultPort = if isHttps then 443 else 80
+        val port = Option.getOpt (urlPort url, defaultPort)
+        val s = createConnection (urlHost url) defaultPort
 
         val _ = write s ("GET " ^ (urlPath url) ^ " HTTP/1.0\r\n")
 
         val _ = write s ("Host: " ^ (urlHost url) ^ "\r\n\r\n")
 
         val response = readResponse s
-        val parsed = parseResponse response
         val _ = Socket.close s
     in
-    parsed
+        parseResponse response
     end
 
-val (status, headers, page) = request "http://example.org/"
+val x = parseUrl "http://example.org:8000/neat_little_path/?qyuery=/hsbn/#fnuuu"
+
+val _ = dumpUrl x
+
+val _ = print (urlPath x)
+
+
+
+val (status, headers, page) = request "http://niklas.org/"
 
 val _ = println status
 
@@ -166,10 +188,3 @@ val n = length headers
 
 val _ = println (Int.toString n)
 
-val x = parseUrl "http://example.org:8080"
-
-val _ = dumpUrl x
-
-val z = Byte.stringToBytes "Hello\r\n, hello"
-val (x, y) = splitLine (Word8VectorSlice.full z)
-val _ = println (Byte.unpackStringVec x)
