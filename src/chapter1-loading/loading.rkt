@@ -1,5 +1,7 @@
 #lang racket
 
+(require openssl)
+
 (struct url (raw scheme user host port path query fragment) #:transparent)
 
 (define (parse-url str)
@@ -24,8 +26,11 @@
 (define (request site)
   (define url (if (url? site) site (parse-url site)))
   (define https? (string=? (url-scheme url) "https"))
-  (define port (if (url-port url) (url-port url) 80))
-  (define-values (inport outport) (tcp-connect (url-host url) port))
+  (define port (if (url-port url) (url-port url) (if https? 443 80)))
+  (define-values (inport outport) 
+    (if https?
+      (ssl-connect (url-host url) port 'secure) 
+      (tcp-connect (url-host url) port)))
   (fprintf outport "GET ~a HTTP/1.0\r\n" (url-path url))
   (fprintf outport "Host: ~a\r\n\r\n" (url-host url))
   (flush-output outport)
