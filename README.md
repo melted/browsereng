@@ -1,1 +1,1 @@
-Working through the [Web Browser Engineering book](https://browser.engineering/index.html) in Standard ML.
+Working through the [Web Browser Engineering book](https://browser.engineering/index.html) in ~~Standard ML~~ Racket (forgive me, SML fans, but I'm too lazy to make OpenSSL bindings from scratch right now).
