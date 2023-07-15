@@ -91,6 +91,13 @@
           (list->string (reverse chars))
           (loop (cons ch chars))))))
 
+(define (read-entity port)
+  (let ((entity (read-until port #\;)))
+    (match entity
+      ("gt" #\>)
+      ("lt" #\<)
+      (else (error "non-supported entity")))))
+
 (define (show body)
   (define input (open-input-bytes body))
   (define output (open-output-string))
@@ -104,17 +111,19 @@
             (when (= (hash-ref! active-tags tag -1) 0)
               (hash-remove! active-tags tag)))
           (hash-update! active-tags tag add1 1))))
+  (define (emit ch)
+    (when (hash-has-key? active-tags "body") (write-char ch output)))
   (let loop ()
     (let ((ch (read-char input)))
       (if (eof-object? ch)
           void
-          (if (char=? ch #\<)
-              (begin
-                (read-tag)
-                (loop))
-              (begin
-                (when (hash-has-key? active-tags "body") (write-char ch output))
-                (loop))))))
+          (begin
+            (case ch
+              ((#\<) (read-tag))
+              ((#\&) (let ((entity (read-entity input)))
+                        (emit entity)))
+              (else (emit ch)))
+            (loop)))))
   (define disp (get-output-string output))
   (display disp))
 
