@@ -1,8 +1,12 @@
 #lang racket
 
 (require openssl)
+(require net/base64)
+ (require net/uri-codec)
 
 (struct url (raw scheme user host port path query fragment) #:transparent)
+
+(struct data-content (media-type media-params base64? data) #:transparent)
 
 (define (parse-http-url str)
   (match-define (list _ scheme _ user host _ port path _ query _ fragment)
@@ -18,11 +22,20 @@
   (define npath (if (equal? (system-type 'os) 'windows) (string-trim path "/" #:right? #f) path))
   (url str "file" user (if host host "localhost") port npath #f #f))
 
+(define (parse-data-url str)
+  (match-define (list data _ media media-attr _ base64 values)
+    (regexp-match
+     #px"data:(([a-zA-Z0-9\\-.~_/]+)?((;[a-zA-Z0-9\\-.~_]+=[a-zA-Z0-9\\-.~_]+)*)(;base64)?)?,([a-zA-Z0-9\\-.~_%]*)" str))
+  (url str "data" #f #f #f
+       (data-content media (string-split media-attr ";") (if base64 #t #f) (string->bytes/utf-8 values))
+       #f #f))
+
 (define (parse-url str)
   (define split (string-split str ":" #:repeat? #f))
   (case (car split)
     (("http" "https") (parse-http-url str))
     (("file") (parse-file-url str))
+    (("data") (parse-data-url str))
     (else (error "Unknown URL scheme"))))
 
 (struct response (status headers body) #:transparent)
@@ -63,6 +76,13 @@
   (call-with-input-file (url-path url)
     (λ (port)
       (port->bytes port))))
+
+(define (data-load url)
+  (define content (url-path url))
+  (unless (data-content? content) (error "Malformed data URL"))
+  ((if (data-content-base64? content)
+      base64-decode
+      uri-decode) (data-content-data content)))
 
 (define (show body)
   (define input (open-input-bytes body))
