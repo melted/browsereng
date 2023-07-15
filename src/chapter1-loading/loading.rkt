@@ -84,18 +84,37 @@
       base64-decode
       uri-decode) (data-content-data content)))
 
+(define (read-until port end-char)
+  (let loop ((chars '()))
+    (let ((ch (read-char port)))
+      (if (char=? end-char ch)
+          (list->string (reverse chars))
+          (loop (cons ch chars))))))
+
 (define (show body)
   (define input (open-input-bytes body))
   (define output (open-output-string))
-  (let loop ((in-tag? #f))
+  (define active-tags (make-hash))
+  (define (read-tag)
+    (let* ((tag-content (read-until input #\>))
+          (tag (car (string-split tag-content))))
+      (if (char=? (string-ref tag 0) #\/)
+          (let ((tag (substring tag 1)))
+            (hash-update! active-tags tag sub1)
+            (when (= (hash-ref! active-tags tag -1) 0)
+              (hash-remove! active-tags tag)))
+          (hash-update! active-tags tag add1 1))))
+  (let loop ()
     (let ((ch (read-char input)))
       (if (eof-object? ch)
           void
-          (if (or in-tag? (char=? ch #\<))
-              (loop (not (char=? ch #\>)))
+          (if (char=? ch #\<)
               (begin
-                (write-char ch output)
-                (loop #f))))))
+                (read-tag)
+                (loop))
+              (begin
+                (when (hash-has-key? active-tags "body") (write-char ch output))
+                (loop))))))
   (define disp (get-output-string output))
   (display disp))
 
@@ -107,5 +126,6 @@
        (begin
          (match-define (response status headers body) (request site))
          body))
-      (("file") (file-load url))))
+      (("file") (file-load url))
+      (("data") (data-load url))))
   (show body))
