@@ -4,6 +4,7 @@
 (require net/base64)
 (require net/uri-codec)
 (require file/gunzip)
+(require db)
 
 (struct url (raw scheme user host port path query fragment) #:transparent)
 
@@ -48,12 +49,49 @@
 
 (struct response (status headers body) #:transparent)
 
+
 (define (get-header key headers)
-   (let ((kv (assf (λ (k) (string-ci=? k key)) headers)))
-     (and kv (cdr kv))))
+  (let ((kv (assf (λ (k) (string-ci=? k key)) headers)))
+    (and kv (cdr kv))))
 
 (define (has-header? key headers)
   (and (get-header key headers) #t))
+
+(define get-db-connection
+  (let ((db (sqlite3-connect #:database "cache.db" #:mode 'create)))
+    (query-exec db "create table if not exists settings (setting unique on conflict replace, value)")
+    (query-exec db "create table if not exists items (name unique on conflict replace, max_age, time, etag, content)")
+    (query-exec db "create index if not exists names on items (name)")
+    (query-exec db "create index if not exists age on items (time)")
+    (λ () db)))
+
+(define (cache-add url resp)
+  (define ccraw (get-header "cache-control" (response-headers resp)))
+  (when ccraw
+    (define cc (map string-trim (string-split ccraw ",")))
+    (unless (or (member "no-cache" cc  string-ci=?) (member "no-store" cc string-ci=?))
+      (let ((max-age (memf (λ (k) (string-prefix? k "max-age")) cc)))
+        (let ((age (and max-age (string->number (cadr (string-split (car max-age) "="))))))
+          (when age
+            (query-exec (get-db-connection)
+                        "insert into items values(?, ?, ?, ?, ?)"
+                        (url-raw url)
+                        age
+                        (current-seconds)
+                        ""
+                        (response-body resp))))))))
+
+(define (cache-get name)
+  (define row (query-maybe-row (get-db-connection) "select * from items where name = ?" name))
+  (if row
+      (match-let (((vector name maxage time etag content) row))
+        (if (< (current-seconds) (+ time maxage))
+            content
+            (begin
+              (query-exec "delete from items where name = ?" name)
+              #f)))
+      #f))
+
 
 (define (get-response inport)
   (define status-line (read-line inport 'return-linefeed))
@@ -87,9 +125,9 @@
                   (apply bytes-append (reverse chunks)))))))))
   (define content
     (cond
-       (chunked? (read-chunks inport))
-       ((has-header? "content-length" headers) (read-body inport))
-       (else #"")))
+      (chunked? (read-chunks inport))
+      ((has-header? "content-length" headers) (read-body inport))
+      (else #"")))
   (define body (if gzip?
                    (let ((inflated (open-output-bytes))
                          (body (open-input-bytes content)))
@@ -117,12 +155,14 @@
   (close-input-port inport)
   (close-output-port outport)
   (if (and (string-prefix? (response-status resp) "3")
-      (< redirects 10))
+           (< redirects 10))
       (let ((loc (get-header "location" (response-headers resp))))
         (if loc
             (request loc #:redirects (add1 redirects))
             resp))
-      resp))
+      (begin
+        (cache-add url resp)
+        resp)))
 
 (define (file-load url)
   (call-with-input-file (url-path url) (λ (port) (port->bytes port))))
@@ -141,13 +181,13 @@
 
 (define (convert-entity entity)
   (cond
-      [(string-prefix? entity "#x") (integer->char (string->number (substring entity 2) 16))]
-      [(string-prefix? entity "#") (integer->char (string->number (substring entity 1)))]
-      [else
-       (match entity
-         ["gt" #\>]
-         ["lt" #\<]
-         [else (error "non-supported entity")])]))
+    [(string-prefix? entity "#x") (integer->char (string->number (substring entity 2) 16))]
+    [(string-prefix? entity "#") (integer->char (string->number (substring entity 1)))]
+    [else
+     (match entity
+       ["gt" #\>]
+       ["lt" #\<]
+       [else (error "non-supported entity")])]))
 
 (define (read-entity port)
   (let ([entity (string-downcase (read-until port #\;))])
@@ -186,9 +226,11 @@
   (define body
     (case (url-scheme url)
       [("http" "https")
-       (begin
-         (match-define (response status headers body) (request site))
-         body)]
+       (match (cache-get site)
+         (#f (begin
+               (match-define (response status headers body) (request site))
+               body))
+         (b b))]
       [("file") (file-load url)]
       [("data") (data-load url)]))
   (show body))
