@@ -57,6 +57,7 @@
 
 (define (get-response inport)
   (define status-line (read-line inport 'return-linefeed))
+  (define status-code (cadr (string-split status-line)))
   (define (read-headers port)
     (let loop ([acc '()])
       (let ([line (read-line port 'return-linefeed)])
@@ -95,9 +96,9 @@
                      (gunzip-through-ports body inflated)
                      (get-output-bytes inflated))
                    content))
-  (response status-line headers body))
+  (response status-code headers body))
 
-(define (request site)
+(define (request site #:redirects (redirects 0))
   (define url (if (url? site) site (parse-http-url site)))
   (define https? (string=? (url-scheme url) "https"))
   (define port (if (url-port url) (url-port url) (if https? 443 80)))
@@ -112,10 +113,16 @@
   (display (header "User-Agent" "lalalalalalala") outport)
   (display "\r\n" outport)
   (flush-output outport)
-  (define response (get-response inport))
+  (define resp (get-response inport))
   (close-input-port inport)
   (close-output-port outport)
-  response)
+  (if (and (string-prefix? (response-status resp) "3")
+      (< redirects 10))
+      (let ((loc (get-header "location" (response-headers resp))))
+        (if loc
+            (request loc #:redirects (add1 redirects))
+            resp))
+      resp))
 
 (define (file-load url)
   (call-with-input-file (url-path url) (λ (port) (port->bytes port))))
