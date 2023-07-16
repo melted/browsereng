@@ -3,6 +3,7 @@
 (require openssl)
 (require net/base64)
 (require net/uri-codec)
+(require file/gunzip)
 
 (struct url (raw scheme user host port path query fragment) #:transparent)
 
@@ -47,14 +48,27 @@
 
 (struct response (status headers body) #:transparent)
 
+(define (get-header key headers)
+   (let ((kv (assf (λ (k) (string-ci=? k key)) headers)))
+     (and kv (cdr kv))))
+
 (define (parse-response resp)
   (define text (open-input-bytes resp))
   (define status-line (read-line text 'return-linefeed))
   (define headers
     (let loop ([acc '()])
       (let ([line (read-line text 'return-linefeed)])
-        (if (string=? line "") (reverse acc) (loop (cons line acc))))))
-  (define body (port->bytes text))
+        (if (string=? line "")
+            (reverse acc)
+            (match-let (((list _ k v) (regexp-match #px"^([\\w\\-]+):(.+)$" line)))
+              (loop (cons (cons k (string-trim v)) acc)))))))
+  (define gzip? (let ((encoding (get-header "content-encoding" headers)))
+                  (and encoding (string-ci=? encoding "gzip"))))
+  (define body (if gzip?
+                   (let ((inflated (open-output-bytes)))
+                     (gunzip-through-ports text inflated)
+                     (get-output-bytes inflated))
+                   (port->bytes text)))
   (response status-line headers body))
 
 (define (request site)
@@ -68,6 +82,7 @@
   (fprintf outport "GET ~a HTTP/1.1\r\n" (url-path url))
   (display (header "Host" (url-host url)) outport)
   (display (header "Connection" "close") outport)
+  (display (header "Accept-Encoding" "gzip") outport)
   (display "\r\n" outport)
   (flush-output outport)
   (define response (port->bytes inport))
