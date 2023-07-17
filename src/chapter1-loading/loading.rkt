@@ -49,18 +49,18 @@
 
 (struct response (status headers body) #:transparent)
 
-
 (define (get-header key headers)
-  (let ((kv (assf (λ (k) (string-ci=? k key)) headers)))
-    (and kv (cdr kv))))
+  (let ([kv (assf (λ (k) (string-ci=? k key)) headers)]) (and kv (cdr kv))))
 
 (define (has-header? key headers)
   (and (get-header key headers) #t))
 
 (define get-db-connection
-  (let ((db (sqlite3-connect #:database "cache.db" #:mode 'create)))
+  (let ([db (sqlite3-connect #:database "cache.db" #:mode 'create)])
     (query-exec db "create table if not exists settings (setting unique on conflict replace, value)")
-    (query-exec db "create table if not exists items (name unique on conflict replace, max_age, time, etag, content)")
+    (query-exec
+     db
+     "create table if not exists items (name unique on conflict replace, max_age, time, etag, content)")
     (query-exec db "create index if not exists names on items (name)")
     (query-exec db "create index if not exists age on items (time)")
     (λ () db)))
@@ -69,9 +69,9 @@
   (define ccraw (get-header "cache-control" (response-headers resp)))
   (when ccraw
     (define cc (map string-trim (string-split ccraw ",")))
-    (unless (or (member "no-cache" cc  string-ci=?) (member "no-store" cc string-ci=?))
-      (let ((max-age (memf (λ (k) (string-prefix? k "max-age")) cc)))
-        (let ((age (and max-age (string->number (cadr (string-split (car max-age) "="))))))
+    (unless (or (member "no-cache" cc string-ci=?) (member "no-store" cc string-ci=?))
+      (let ([max-age (memf (λ (k) (string-prefix? k "max-age")) cc)])
+        (let ([age (and max-age (string->number (cadr (string-split (car max-age) "="))))])
           (when age
             (query-exec (get-db-connection)
                         "insert into items values(?, ?, ?, ?, ?)"
@@ -84,14 +84,13 @@
 (define (cache-get name)
   (define row (query-maybe-row (get-db-connection) "select * from items where name = ?" name))
   (if row
-      (match-let (((vector name maxage time etag content) row))
+      (match-let ([(vector name maxage time etag content) row])
         (if (< (current-seconds) (+ time maxage))
             content
             (begin
               (query-exec "delete from items where name = ?" name)
               #f)))
       #f))
-
 
 (define (get-response inport)
   (define status-line (read-line inport 'return-linefeed))
@@ -101,39 +100,40 @@
       (let ([line (read-line port 'return-linefeed)])
         (if (string=? line "")
             (reverse acc)
-            (match-let (((list _ k v) (regexp-match #px"^([\\w\\-]+):(.+)$" line)))
+            (match-let ([(list _ k v) (regexp-match #px"^([\\w\\-]+):(.+)$" line)])
               (loop (cons (cons k (string-trim v)) acc)))))))
   (define headers (read-headers inport))
-  (define gzip? (let ((encoding (get-header "content-encoding" headers)))
-                  (and encoding (string-ci=? encoding "gzip"))))
-  (define chunked? (let ((encoding (get-header "transfer-encoding" headers)))
-                     (and encoding (member "chunked" (string-split encoding ",") string-ci=?))))
+  (define gzip?
+    (let ([encoding (get-header "content-encoding" headers)])
+      (and encoding (string-ci=? encoding "gzip"))))
+  (define chunked?
+    (let ([encoding (get-header "transfer-encoding" headers)])
+      (and encoding (member "chunked" (string-split encoding ",") string-ci=?))))
   (define (read-body port)
-    (let ((clen (string->number (get-header "content-length" headers))))
-      (read-bytes clen port)))
+    (let ([clen (string->number (get-header "content-length" headers))]) (read-bytes clen port)))
   (define (read-chunks port)
-    (let loop ((chunks '()))
-      (let ((leader (read-line port 'return-linefeed)))
-        (let ((len (string->number (car (string-split leader)) 16)))
+    (let loop ([chunks '()])
+      (let ([leader (read-line port 'return-linefeed)])
+        (let ([len (string->number (car (string-split leader)) 16)])
           (if (> len 0)
-              (let ((chunk (read-bytes len port)))
+              (let ([chunk (read-bytes len port)])
                 (read-bytes 2 port)
                 (loop (cons chunk chunks)))
               (begin
-                (let ((trailers (read-headers port)))
+                (let ([trailers (read-headers port)])
                   (set! headers (append headers trailers))
                   (apply bytes-append (reverse chunks)))))))))
   (define content
     (cond
-      (chunked? (read-chunks inport))
-      ((has-header? "content-length" headers) (read-body inport))
-      (else #"")))
-  (define body (if gzip?
-                   (let ((inflated (open-output-bytes))
-                         (body (open-input-bytes content)))
-                     (gunzip-through-ports body inflated)
-                     (get-output-bytes inflated))
-                   content))
+      [chunked? (read-chunks inport)]
+      [(has-header? "content-length" headers) (read-body inport)]
+      [else #""]))
+  (define body
+    (if gzip?
+        (let ([inflated (open-output-bytes)] [body (open-input-bytes content)])
+          (gunzip-through-ports body inflated)
+          (get-output-bytes inflated))
+        content))
   (response status-code headers body))
 
 (define (request site #:redirects (redirects 0))
@@ -154,12 +154,9 @@
   (define resp (get-response inport))
   (close-input-port inport)
   (close-output-port outport)
-  (if (and (string-prefix? (response-status resp) "3")
-           (< redirects 10))
-      (let ((loc (get-header "location" (response-headers resp))))
-        (if loc
-            (request loc #:redirects (add1 redirects))
-            resp))
+  (if (and (string-prefix? (response-status resp) "3") (< redirects 10))
+      (let ([loc (get-header "location" (response-headers resp))])
+        (if loc (request loc #:redirects (add1 redirects)) resp))
       (begin
         (cache-add url resp)
         resp)))
@@ -178,7 +175,6 @@
     (let ([ch (read-char port)])
       (if (char=? end-char ch) (list->string (reverse chars)) (loop (cons ch chars))))))
 
-
 (define (convert-entity entity)
   (cond
     [(string-prefix? entity "#x") (integer->char (string->number (substring entity 2) 16))]
@@ -190,8 +186,7 @@
        [else (error "non-supported entity")])]))
 
 (define (read-entity port)
-  (let ([entity (string-downcase (read-until port #\;))])
-    (convert-entity entity)))
+  (let ([entity (string-downcase (read-until port #\;))]) (convert-entity entity)))
 
 (define (show body)
   (define input (open-input-bytes body))
@@ -227,16 +222,16 @@
     (case (url-scheme url)
       [("http" "https")
        (match (cache-get site)
-         (#f (begin
-               (match-define (response status headers body) (request site))
-               body))
-         (b b))]
+         [#f
+          (begin
+            (match-define (response status headers body) (request site))
+            body)]
+         [b b])]
       [("file") (file-load url)]
       [("data") (data-load url)]))
   (show body))
 
 (when (> (vector-length (current-command-line-arguments)) 0)
-    (begin
-      (define target (command-line #:args (uri) uri))
-      (load target)))
-
+  (begin
+    (define target (command-line #:args (uri) uri))
+    (load target)))
