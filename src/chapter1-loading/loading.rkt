@@ -234,3 +234,9 @@
       [("file") (file-load url)]
       [("data") (data-load url)]))
   (show body))
+
+(when (> (vector-length (current-command-line-arguments)) 0)
+    (begin
+      (define target (command-line #:args (uri) uri))
+      (load target)))
+
