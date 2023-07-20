@@ -1,4 +1,6 @@
 *.exe
 *.obj
 *.o
+*.dep
+*.zo
 cache.db
