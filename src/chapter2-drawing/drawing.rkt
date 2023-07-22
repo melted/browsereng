@@ -18,8 +18,17 @@
   (class canvas%
     (field (scroll-x 0))
     (define/override (on-scroll event)
-      (define pos (send event get-position))
-      (set! scroll-x pos)
+      (send this refresh))
+    (define/override (on-char event)
+      (define key (send event get-key-code))
+      (define pos (send this get-scroll-pos 'vertical))
+      (define max-pos (send this get-scroll-range 'vertical))
+      (match key
+        ('up (send this set-scroll-pos 'vertical (max (- pos 100) 0)))
+        ('wheel-up (send this set-scroll-pos 'vertical (max (- pos 100) 0)))
+        ('down (send this set-scroll-pos 'vertical (min (+ pos 100) max-pos)))
+        ('wheel-down (send this set-scroll-pos 'vertical (min (+ pos 100) max-pos)))
+        (else (void)))
       (send this refresh))
     (super-new)))
 
@@ -94,7 +103,7 @@
           (define-values (w h) (send dc get-size))
           (send canvas set-scroll-range 'vertical (display-list-height displ))
           (send canvas set-scroll-page 'vertical h)
-          (draw displ dc (get-field scroll-x canvas))))))
+          (draw displ dc (send canvas get-scroll-pos 'vertical))))))
 
 (send canvas init-manual-scrollbars #f 1000 4 4 0 0)
 
