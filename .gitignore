@@ -4,3 +4,6 @@
 *.dep
 *.zo
 cache.db
+
+resources/downloads
+resources/openmoji
