@@ -67,17 +67,22 @@
     (if (null? rest)
         (display-list (reverse displist) hmax y)
         (let* ((new-x (if (< (+ x hstep) hmax) (+ x hstep) 0))
-               (new-y (if (> x new-x) (+ vstep y) y)))
-          (loop (cons (layout-item x y (car rest)) displist) new-x new-y (cdr rest))))))
+               (new-y (if (> x new-x) (+ vstep y) y))
+               (ch (car rest)))
+          (cond
+            ((char=? ch #\newline) (loop displist 0 (+ 20 y) (cdr rest)))
+            (else (loop (cons (layout-item x y (car rest)) displist) new-x new-y (cdr rest))))))))
 
 (define (draw displ dc offset)
   (define vmax (display-list-height displ))
   (define-values (w h) (send dc get-size))
-  (define top (* (- vmax h) (/ offset 100)))
+  (define top offset)
   (for ((item (display-list-items displ)))
     (match item
       ((layout-item x y (? char? ch))
-       (when (and (> y top) (< y (+ top h))) (send dc draw-text (string ch) x (- y top)))))))
+       (cond
+         ((and (> y (- top 20)) (< y (+ top h 20))) (send dc draw-text (string ch) x (- y top)))
+         (else (void)))))))
 
 (define canvas
   (new web-canvas%
@@ -85,9 +90,13 @@
        (style '(vscroll))
        (paint-callback
         (λ (canvas dc)
-          (draw (get-field displ browser) dc (get-field scroll-x canvas))))))
+          (define displ (get-field displ browser))
+          (define-values (w h) (send dc get-size))
+          (send canvas set-scroll-range 'vertical (display-list-height displ))
+          (send canvas set-scroll-page 'vertical h)
+          (draw displ dc (get-field scroll-x canvas))))))
 
-(send canvas init-manual-scrollbars #f 100 4 4 0 0)
+(send canvas init-manual-scrollbars #f 1000 4 4 0 0)
 
 (send browser show #t)
 
