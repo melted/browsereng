@@ -1,6 +1,6 @@
 #lang racket
 
-(provide read-until read-entity convert-entity)
+(provide read-until read-entity convert-entity string-find string-cut)
 
 
 (define (read-until port end-char)
@@ -21,3 +21,13 @@
 
 (define (read-entity port)
   (let ([entity (string-downcase (read-until port #\;))]) (convert-entity entity)))
+
+(define (string-find str contained)
+  (regexp-match-positions (regexp-quote contained) str))
+
+(define (string-cut str sep)
+  (define pos (string-find str sep))
+  (match pos
+    (#f (list str ""))
+    ((list (cons start end) _ ...)
+      (list (substring str 0 start) (substring str end)))))
