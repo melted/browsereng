@@ -6,7 +6,11 @@
 (define (read-until port end-char)
   (let loop ([chars '()])
     (let ([ch (read-char port)])
-      (if (char=? end-char ch) (list->string (reverse chars)) (loop (cons ch chars))))))
+      (cond
+        ((eof-object? ch) #f)
+        ((char=? end-char ch)
+          (list->string (reverse chars)))
+        (else (loop (cons ch chars)))))))
 
 
 (define (convert-entity entity)

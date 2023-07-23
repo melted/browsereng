@@ -54,48 +54,56 @@
        (width 800)
        (height 600)))
 
+(struct tag-node (name rest) #:transparent)
+(struct text-node (str) #:transparent)
+
 (define (lex body)
   (define input (open-input-bytes body))
-  (define output (open-output-string))
-  (define active-tags (make-hash))
   (define (read-tag)
-    (let* ([tag-content (read-until input #\>)] [tag (car (string-split tag-content))])
-      (if (char=? (string-ref tag 0) #\/)
-          (let ([tag (substring tag 1)])
-            (hash-update! active-tags tag sub1)
-            (when (= (hash-ref! active-tags tag -1) 0)
-              (hash-remove! active-tags tag)))
-          (hash-update! active-tags tag add1 1))))
-  (define (emit ch)
-    (when (hash-has-key? active-tags "body")
-      (write-char ch output)))
-  (let loop ()
+    (let* ([tag-content (read-until input #\>)]
+           [t (string-cut tag-content " ")])
+      (if tag-content
+          (tag-node (car t) (cdr t))
+          #f)))
+  (define (make-text chars)
+    (text-node (list->string (reverse chars))))
+  (let loop ((items '()) (chars '()))
     (let ([ch (read-char input)])
-      (if (eof-object? ch)
-          void
-          (begin
-            (case ch
-              [(#\<) (read-tag)]
-              [(#\&) (let ([entity (read-entity input)]) (emit entity))]
-              [else (emit ch)])
-            (loop)))))
-  (get-output-string output))
+      (match ch
+        [(? eof-object? c) (if (null? chars)
+                               (reverse items)
+                               (reverse (cons (make-text chars) items)))]
+        [#\< (let ((new-items (if (null? chars)
+                                  items
+                                  (cons (make-text chars) items)))
+                   (tag? (read-tag)))
+               (if tag?
+                   (loop (cons tag? new-items) '())
+                   (loop new-items '())))]
+        [#\& (let ([entity (read-entity input)]) (loop items (cons entity chars)))]
+        [else (loop items (cons ch chars))]))))
 
-(struct display-list (items width height font))
-(struct layout-item (x y content))
+(struct display-list (items width height font) #:transparent)
+(struct layout-item (x y content font) #:transparent)
 
 (define (layout page hmax font)
   (define dc (new bitmap-dc%))
   (when font (send dc set-font font))
   (define-values (hspace vstep desc ef) (send dc get-text-extent " "))
-  (let loop ((displist '()) (x 0) (y 0) (rest (string-split page)))
+  (let loop ((displist '()) (x 0) (y 0) (rest page))
     (if (null? rest)
         (display-list (reverse displist) hmax y font)
-        (let* ((word (car rest))
-               (hstep (let-values (((w h d e) (send dc get-text-extent word font #t))) w)) 
-               (new-x (if (< (+ x hstep) hmax) (+ x hstep hspace) 0))
-               (new-y (if (= new-x 0) (+ (* vstep 1.25) y) y)))
-          (loop (cons (layout-item x y (car rest)) displist) new-x new-y (cdr rest))))))
+        (match (car rest)
+          ((text-node str)
+           (let loop2 ((dlist displist) (dx x) (dy y) (words (string-split str)))
+             (if (null? words)
+                 (loop dlist dx dy (cdr rest))
+                 (let* ((word (car words))
+                  (hstep (let-values (((w h d e) (send dc get-text-extent word font #t))) w)) 
+                  (new-x (if (< (+ dx hstep) hmax) (+ dx hstep hspace) 0))
+                  (new-y (if (= new-x 0) (+ (* vstep 1.25) dy) dy)))
+                   (loop2 (cons (layout-item dx dy word font) dlist) new-x new-y (cdr words))))))
+           ((tag-node tg _) (loop displist x y (cdr rest)))))))
 
 (define (draw displ dc offset)
   (define vmax (display-list-height displ))
@@ -105,11 +113,11 @@
   (send dc set-font font)
   (for ((item (display-list-items displ)))
     (match item
-      ((layout-item x y (? string? str))
+      ((layout-item x y (? string? str) f)
        (cond
          ((and (> y (- top 20)) (< y (+ top h 20)))
-            (send dc draw-text str x (- y top) #t))))
-         (else (void)))))
+          (send dc draw-text str x (- y top) #t))))
+      (else (void)))))
 
 (define canvas
   (new web-canvas%
@@ -118,10 +126,11 @@
        (paint-callback
         (λ (canvas dc)
           (define displ (get-field displ browser))
-          (define-values (w h) (send dc get-size))
-          (send canvas set-scroll-range 'vertical (inexact->exact (floor (display-list-height displ))))
-          (send canvas set-scroll-page 'vertical h)
-          (draw displ dc (send canvas get-scroll-pos 'vertical))))))
+          (when displ
+            (define-values (w h) (send dc get-size))
+            (send canvas set-scroll-range 'vertical (inexact->exact (floor (display-list-height displ))))
+            (send canvas set-scroll-page 'vertical h)
+            (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
 
 (send canvas init-manual-scrollbars #f 1000 4 4 0 0)
 
