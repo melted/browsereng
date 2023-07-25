@@ -9,7 +9,7 @@
     (field (displ #f))
     (field (text #f))
     (field (inner #f))
-    (field (font (make-font #:size 15 #:face "Times New Roman")))
+    (field (font "Georgia"))
     (define/public (load site)
       (define body (get-page site))
       (define txt (lex body))
@@ -22,7 +22,6 @@
         (set! displ (layout text (- (send inner get-width) 20) font))
         (send this refresh)))
     (define/public (resize-font pts)
-      (set! font (make-font #:size pts #:face "Times New Roman"))
       (relayout))
     (super-new)))
 
@@ -86,83 +85,133 @@
 (struct display-list (items width height font) #:transparent)
 (struct layout-item (x y content font) #:transparent)
 
-(struct layout-state (x y line items font tags dc width) #:transparent #:mutable)
+(struct layout-state (x y line items font styling dc width) #:transparent #:mutable)
 
 (struct text-metrics (w h desc) #:transparent)
 
-(define (measure state str)
+(define (measure state str font)
   (let-values (((w h d e)
                 (send (layout-state-dc state)
                       get-text-extent
                       str
-                      (layout-state-font state)
+                      font
                       #t)))
     (text-metrics w h d)))
-  
+
+(define (layout-flush state)
+  (define line (layout-state-line state))
+  (unless (null? line)
+    (define (get-metrics i) (measure state (layout-item-content i) (layout-item-font i)))
+    (define metrics (map get-metrics line))
+    (define (ascent m)
+      (- (text-metrics-h m) (text-metrics-desc m)))
+    (define max-ascent (apply max (map ascent metrics)))
+    (define max-descent (apply max (map text-metrics-desc metrics)))
+    (define baseline (+ (layout-state-y state) (* 1.25 max-ascent)))
+    (define/match (adjust item)
+      (((layout-item x y word f)) (layout-item x (- baseline (ascent (get-metrics item))) word f)))
+    (define adjusted (map adjust line))
+    (set-layout-state-x! state 0)
+    (set-layout-state-y! state (+ baseline max-descent))
+    (set-layout-state-line! state '())
+    (set-layout-state-items! state (append (layout-state-items state) adjusted))))
+
+(define (update-font state)
+  (define face (send (layout-state-font state) get-face))
+  (define styling (layout-state-styling state))
+  (define size (hash-ref! styling 'size 12))
+  (define font (make-font #:face face #:size size #:style
+                          (if (hash-has-key? styling 'italic) 'italic 'normal)
+                          #:weight (if (hash-has-key? styling 'bold) 'heavy 'normal)
+                          #:font-list the-font-list))
+  (set-layout-state-font! state font))
+
 (define (layout-token token state)
+  (define (add n) (λ (i) (+ i n)))
+  (define styles (layout-state-styling state))
   (match token
     ((text-node str)
-     (let ((space (text-metrics-w (measure state " "))))
+     (let ((space (text-metrics-w (measure state " " (layout-state-font state)))))
        (for ((word (string-split str)))
-         (match-define (layout-state x y line items font tags dc width) state)
-         (let ((metrics (measure state word)))
+         (match-define (layout-state x y line items font _ dc width) state)
+         (let ((metrics (measure state word font)))
            (when (> (+ x (text-metrics-w metrics)) width)
-             (set-layout-state-x! state 0)
-             (set-layout-state-y! state (+ y (* (text-metrics-h metrics) 1.25))))
+             (layout-flush state))
            (let ((item (layout-item (layout-state-x state)
                                     (layout-state-y state)
                                     word
                                     font)))
-             (set-layout-state-items! state (cons item items))
+             (set-layout-state-line! state (cons item (layout-state-line state)))
              (set-layout-state-x! state (+ (text-metrics-w metrics)
                                            space (layout-state-x state))))))))
-     ((tag-node tag _) void)))
+    ((tag-node "b" _) (hash-set! styles 'bold #t)
+                      (update-font state))
+    ((tag-node "/b" _) (hash-remove! styles 'bold)
+                      (update-font state))
+    ((tag-node "i" _) (hash-set! styles 'italic #t)
+                      (update-font state))
+    ((tag-node "/i" _) (hash-remove! styles 'italic)
+                      (update-font state))
+    ((tag-node "big" _) (hash-update! styles 'size (add 4) 16)
+                      (update-font state))
+    ((tag-node "/big" _) (hash-update! styles 'size (add -4) 12)
+                      (update-font state))
+    ((tag-node "small" _) (hash-update! styles 'size (add -2) 10)
+                      (update-font state))
+    ((tag-node "/small" _) (hash-update! styles 'size (add 2) 12)
+                      (update-font state))
+    ((tag-node "br" _) (layout-flush state))
+    ((tag-node "/p" _) (layout-flush state)
+                     (set-layout-state-y! state (+ (layout-state-y state) 15)))
+    
+    ((tag-node tag _) void)))
 
-  (define (layout tokens width font)
-    (define dc (new bitmap-dc%))
-    (when font (send dc set-font font))
-    (define state (layout-state 0 0 0 '() font '() dc width))
-    (for ((t tokens))
-      (layout-token t state))
-    (display-list (reverse (layout-state-items state)) width (layout-state-y state) font))
+(define (layout tokens width face)
+  (define dc (new bitmap-dc%))
+  (define font (make-font #:face face))
+  (define state (layout-state 0 0 '() '() font (make-hash) dc width))
+  (for ((t tokens))
+    (layout-token t state))
+  (layout-flush state)
+  (display-list (layout-state-items state) width (layout-state-y state) font))
 
-  (define (draw displ dc offset)
-    (define vmax (display-list-height displ))
-    (define font (display-list-font displ))
-    (define-values (w h) (send dc get-size))
-    (define top offset)
-    (send dc set-font font)
-    (for ((item (display-list-items displ)))
-      (match item
-        ((layout-item x y (? string? str) f)
-         (cond
-           ((and (> y (- top 20)) (< y (+ top h 20)))
-            (send dc draw-text str x (- y top) #t))))
-        (else (void)))))
+(define (draw displ dc offset)
+  (define vmax (display-list-height displ))
+  (define font (display-list-font displ))
+  (define-values (w h) (send dc get-size))
+  (define top offset)
+  (send dc set-font font)
+  (for ((item (display-list-items displ)))
+    (match item
+      ((layout-item x y (? string? str) f)
+       (cond
+         ((and (> y (- top 20)) (< y (+ top h 20)))
+          (send dc set-font f)
+          (send dc draw-text str x (- y top) #t))))
+      (else (void)))))
 
-  (define canvas
-    (new web-canvas%
-         (parent browser)
-         (style '(vscroll))
-         (paint-callback
-          (λ (canvas dc)
-            (define displ (get-field displ browser))
-            (when displ
-              (define-values (w h) (send dc get-size))
-              (send canvas
-                    set-scroll-range
-                    'vertical
-                    (inexact->exact (floor (display-list-height displ))))
-              (send canvas set-scroll-page 'vertical h)
-              (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
+(define canvas
+  (new web-canvas%
+       (parent browser)
+       (style '(vscroll))
+       (paint-callback
+        (λ (canvas dc)
+          (define displ (get-field displ browser))
+          (when displ
+            (define-values (w h) (send dc get-size))
+            (send canvas
+                  set-scroll-range
+                  'vertical
+                  (inexact->exact (floor (display-list-height displ))))
+            (send canvas set-scroll-page 'vertical h)
+            (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
 
-  (send canvas init-manual-scrollbars #f 1000 4 4 0 0)
+(send canvas init-manual-scrollbars #f 1000 4 4 0 0)
 
-  (send browser show #t)
+(send browser show #t)
 
 
-  (define test-url "https://browser.engineering/examples/xiyouji.html")
-  (define test-url2 "file:///D:/Niklas/src/browsereng/test/default.html")
-  (define test-url3 "https://browser.engineering/")
-  (send browser load test-url2)
-  
+(define test-url "https://browser.engineering/examples/xiyouji.html")
+(define test-url2 "file:///D:/Niklas/src/browsereng/test/default.html")
+(define test-url3 "https://browser.engineering/")
+(send browser load test-url2)

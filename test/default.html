@@ -4,18 +4,18 @@
     &gt; &lt; &#x1f600;
     <p>Some more content</p>
     Word by word
-In the last chapter, the layout function looped over the text character-by-character and moved to the next line whenever we ran out of space. That’s appropriate in Chinese, where each character more or less is a word. But in English you can’t move to the next line in the middle of a word. Instead, we need to lay out the text one word at a time:
+<i>In the last chapter, the layout function looped over the text character-by-character and moved to the next line whenever we ran out of space.</i> That’s appropriate in Chinese, <small>where each character</small> more or less is a word. But in English you can’t move to the <big>next line in the middle</big> of a word. Instead, we need to lay out the text one word at a time:
+<br>
+for word in text.split():<br>
+    w = font.measure(word)<br>
+    if cursor_x + w > WIDTH - HSTEP:<br>
+        cursor_y += font.metrics("linespace") * 1.25<br>
+        cursor_x = HSTEP<br>
+    self.display_list.append((cursor_x, cursor_y, word))<br>
+    cursor_x += w + font.measure(" ")<br>
+<p>There’s a lot of moving parts to this code. First, we measure the width of the text, and store it in w. We’d normally draw <b>boom boom boom</b>the text at cursor_x, so its right end would be at cursor_x + w, so we check if that’s past the edge of the page. Now we have the location to start drawing the word, so we add to the display list; and finally we update cursor_x to point to the end of the word.</p>
 
-for word in text.split():
-    w = font.measure(word)
-    if cursor_x + w > WIDTH - HSTEP:
-        cursor_y += font.metrics("linespace") * 1.25
-        cursor_x = HSTEP
-    self.display_list.append((cursor_x, cursor_y, word))
-    cursor_x += w + font.measure(" ")
-There’s a lot of moving parts to this code. First, we measure the width of the text, and store it in w. We’d normally draw the text at cursor_x, so its right end would be at cursor_x + w, so we check if that’s past the edge of the page. Now we have the location to start drawing the word, so we add to the display list; and finally we update cursor_x to point to the end of the word.
-
-There are a few surprises in this code. One is that I call metrics with an argument; that just returns the named metric directly. Also, I increment cursor_x by w + font.measure(" ") instead of w. That’s because I want to have spaces between the words: the call to split() removed all of the whitespace, and this adds it back. I don’t add the space to w on the second line, though, because you don’t need a space after the last word on a line.
+<p>There are a few surprises in this code. One is that I call metrics with an argument; that just returns the named metric directly. Also, I increment cursor_x by w + font.measure(" ") instead of w. That’s because I want to have spaces between the words: the call to split() removed all of the whitespace, and this adds it back. I don’t add the space to w on the second line, though, because you don’t need a space after the last word on a line.</p>
 
 Finally, note that I multiply the linespace by 1.25 when incrementing y. Try removing the multiplier: you’ll see that the text is harder to read because the lines are too close together. Instead, it is common to add “line spacing” or “leading” between lines. The 25% line spacing is a normal amount.
 </body>
