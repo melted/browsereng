@@ -19,7 +19,7 @@
       (relayout))
     (define/public (relayout)
       (when text
-        (set! displ (layout text (- (send inner get-width) 100) font))
+        (set! displ (layout text (- (send inner get-width) 20) font))
         (send this refresh)))
     (define/public (resize-font pts)
       (set! font (make-font #:size pts #:face "Times New Roman"))
@@ -86,58 +86,83 @@
 (struct display-list (items width height font) #:transparent)
 (struct layout-item (x y content font) #:transparent)
 
-(define (layout page hmax font)
-  (define dc (new bitmap-dc%))
-  (when font (send dc set-font font))
-  (define-values (hspace vstep desc ef) (send dc get-text-extent " "))
-  (let loop ((displist '()) (x 0) (y 0) (rest page))
-    (if (null? rest)
-        (display-list (reverse displist) hmax y font)
-        (match (car rest)
-          ((text-node str)
-           (let loop2 ((dlist displist) (dx x) (dy y) (words (string-split str)))
-             (if (null? words)
-                 (loop dlist dx dy (cdr rest))
-                 (let* ((word (car words))
-                  (hstep (let-values (((w h d e) (send dc get-text-extent word font #t))) w)) 
-                  (new-x (if (< (+ dx hstep) hmax) (+ dx hstep hspace) 0))
-                  (new-y (if (= new-x 0) (+ (* vstep 1.25) dy) dy)))
-                   (loop2 (cons (layout-item dx dy word font) dlist) new-x new-y (cdr words))))))
-           ((tag-node tg _) (loop displist x y (cdr rest)))))))
+(struct layout-state (x y line items font tags dc width) #:transparent #:mutable)
 
-(define (draw displ dc offset)
-  (define vmax (display-list-height displ))
-  (define font (display-list-font displ))
-  (define-values (w h) (send dc get-size))
-  (define top offset)
-  (send dc set-font font)
-  (for ((item (display-list-items displ)))
-    (match item
-      ((layout-item x y (? string? str) f)
-       (cond
-         ((and (> y (- top 20)) (< y (+ top h 20)))
-          (send dc draw-text str x (- y top) #t))))
-      (else (void)))))
+(struct text-metrics (w h desc) #:transparent)
 
-(define canvas
-  (new web-canvas%
-       (parent browser)
-       (style '(vscroll))
-       (paint-callback
-        (λ (canvas dc)
-          (define displ (get-field displ browser))
-          (when displ
-            (define-values (w h) (send dc get-size))
-            (send canvas set-scroll-range 'vertical (inexact->exact (floor (display-list-height displ))))
-            (send canvas set-scroll-page 'vertical h)
-            (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
+(define (measure state str)
+  (let-values (((w h d e)
+                (send (layout-state-dc state)
+                      get-text-extent
+                      str
+                      (layout-state-font state)
+                      #t)))
+    (text-metrics w h d)))
+  
+(define (layout-token token state)
+  (match token
+    ((text-node str)
+     (let ((space (text-metrics-w (measure state " "))))
+       (for ((word (string-split str)))
+         (match-define (layout-state x y line items font tags dc width) state)
+         (let ((metrics (measure state word)))
+           (when (> (+ x (text-metrics-w metrics)) width)
+             (set-layout-state-x! state 0)
+             (set-layout-state-y! state (+ y (* (text-metrics-h metrics) 1.25))))
+           (let ((item (layout-item (layout-state-x state)
+                                    (layout-state-y state)
+                                    word
+                                    font)))
+             (set-layout-state-items! state (cons item items))
+             (set-layout-state-x! state (+ (text-metrics-w metrics)
+                                           space (layout-state-x state))))))))
+     ((tag-node tag _) void)))
 
-(send canvas init-manual-scrollbars #f 1000 4 4 0 0)
+  (define (layout tokens width font)
+    (define dc (new bitmap-dc%))
+    (when font (send dc set-font font))
+    (define state (layout-state 0 0 0 '() font '() dc width))
+    (for ((t tokens))
+      (layout-token t state))
+    (display-list (reverse (layout-state-items state)) width (layout-state-y state) font))
 
-(send browser show #t)
+  (define (draw displ dc offset)
+    (define vmax (display-list-height displ))
+    (define font (display-list-font displ))
+    (define-values (w h) (send dc get-size))
+    (define top offset)
+    (send dc set-font font)
+    (for ((item (display-list-items displ)))
+      (match item
+        ((layout-item x y (? string? str) f)
+         (cond
+           ((and (> y (- top 20)) (< y (+ top h 20)))
+            (send dc draw-text str x (- y top) #t))))
+        (else (void)))))
+
+  (define canvas
+    (new web-canvas%
+         (parent browser)
+         (style '(vscroll))
+         (paint-callback
+          (λ (canvas dc)
+            (define displ (get-field displ browser))
+            (when displ
+              (define-values (w h) (send dc get-size))
+              (send canvas
+                    set-scroll-range
+                    'vertical
+                    (inexact->exact (floor (display-list-height displ))))
+              (send canvas set-scroll-page 'vertical h)
+              (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
+
+  (send canvas init-manual-scrollbars #f 1000 4 4 0 0)
+
+  (send browser show #t)
 
 
-(define test-url "https://browser.engineering/examples/xiyouji.html")
-(define test-url2 "file:///D:/Niklas/src/browsereng/test/default.html")
-(define test-url3 "https://browser.engineering/")
-(send browser load test-url2)
+  (define test-url "https://browser.engineering/examples/xiyouji.html")
+  (define test-url2 "file:///D:/Niklas/src/browsereng/test/default.html")
+  (define test-url3 "https://browser.engineering/")
+  (send browser load test-url2)
+  
