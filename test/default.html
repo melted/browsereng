@@ -3,8 +3,9 @@
     <b>default </b>
     &gt; &lt; &#x1f600;
     <p>Some more content</p>
-    Word by word
-<i>In the last chapter, the layout function looped over the text character-by-character and moved to the next line whenever we ran out of space.</i> That’s appropriate in Chinese, <small>where each character</small> more or less is a word. But in English you can’t move to the <big>next line in the middle</big> of a word. Instead, we need to lay out the text one word at a time:
+    <h1>Word by word</h1>
+
+    <i>In the last chapter, the layout function looped over the text character-by-character and moved to the next line whenever we ran out of space.</i> That’s appropriate in Chinese, <small>where each character</small> more or less is a word. But in English you can’t move to the <big>next line in the middle</big> of a word. Instead, we need to lay out the text one word at a time:
 <br>
 for word in text.split():<br>
     w = font.measure(word)<br>
