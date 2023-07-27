@@ -21,6 +21,7 @@
      (match entity
        ["gt" #\>]
        ["lt" #\<]
+       ["shy" #\u00ad]
        [else (error "non-supported entity")])]))
 
 (define (read-entity port)
