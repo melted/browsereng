@@ -9,7 +9,7 @@
     (field (displ #f))
     (field (text #f))
     (field (inner #f))
-    (field (font "Georgia"))
+    (field (font "Arial"))
     (define/public (load site)
       (define body (get-page site))
       (define txt (lex body))
@@ -133,8 +133,9 @@
   (define size (hash-ref! styling 'size 12))
   (define style (if (hash-has-key? styling 'italic) 'italic 'normal))
   (define weight (if (hash-has-key? styling 'bold) 'heavy 'normal))
+  (define feature-settings (if (hash-has-key? styling 'abbr) (hash "smcp" 1) (hash)))
   (define font (make-font #:face face #:size size #:style style
-                          #:weight weight
+                          #:weight weight #:feature-settings feature-settings
                           #:font-list the-font-list))
   (set-layout-state-font! state (cons font (layout-state-font state))))
 
@@ -157,7 +158,8 @@
             (let ((first (string-append (car break?) (string #\u2010))))
               (fit state first space)
               (layout-flush state)
-              (set! word (cadr break?)))
+              (set! word (cadr break?))
+              (set! metrics (measure state word font)))
             (layout-flush state))))
     (let ((item (layout-item (layout-state-x state)
                              (layout-state-y state)
@@ -219,6 +221,10 @@
                         (update-font state))
     ((tag-node "/pre" _) (hash-remove! styles 'pre)
                          (pop-font state))
+    ((tag-node "abbr" _) (hash-set! styles 'abbr #t)
+                      (update-font state))
+    ((tag-node "/abbr" _) (hash-remove! styles 'abbr)
+                       (pop-font state))
     ((tag-node tag _) void)))
 
 (define (layout tokens width face)
