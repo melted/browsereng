@@ -9,7 +9,8 @@
     (field (displ #f))
     (field (text #f))
     (field (inner #f))
-    (field (font "Arial"))
+    (field (font "Comic Sans MS"))
+    (field (font-size 14))
     (define/public (load site)
       (define body (get-page site))
       (define txt (lex body))
@@ -19,9 +20,10 @@
       (relayout))
     (define/public (relayout)
       (when text
-        (set! displ (layout text (- (send inner get-width) 20) font))
+        (set! displ (layout text (- (send inner get-width) 20) font font-size))
         (send this refresh)))
     (define/public (resize-font pts)
+      (set! font-size pts)
       (relayout))
     (super-new)))
 
@@ -129,10 +131,11 @@
 
 (define (update-font state)
   (define styling (layout-state-styling state))
-  (define face (hash-ref! styling 'face (send (car (layout-state-font state)) get-face)))
-  (define size (hash-ref! styling 'size 12))
-  (define style (if (hash-has-key? styling 'italic) 'italic 'normal))
-  (define weight (if (hash-has-key? styling 'bold) 'heavy 'normal))
+  (define old-font (car (layout-state-font state)))
+  (define face (hash-ref! styling 'face (send old-font get-face)))
+  (define size (hash-ref! styling 'size (send old-font get-size)))
+  (define style (if (hash-has-key? styling 'italic) 'italic (send old-font get-style)))
+  (define weight (if (hash-has-key? styling 'bold) 'heavy (send old-font get-weight)))
   (define feature-settings (if (hash-has-key? styling 'abbr) (hash "smcp" 1) (hash)))
   (define font (make-font #:face face #:size size #:style style
                           #:weight weight #:feature-settings feature-settings
@@ -227,9 +230,9 @@
                        (pop-font state))
     ((tag-node tag _) void)))
 
-(define (layout tokens width face)
+(define (layout tokens width face font-size)
   (define dc (new bitmap-dc%))
-  (define font (make-font #:face face))
+  (define font (make-font #:face face #:size font-size))
   (define state (layout-state 0 0 '() '() (list font) (make-hash) dc width))
   (for ((t tokens))
     (layout-token t state))
