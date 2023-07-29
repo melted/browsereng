@@ -84,7 +84,7 @@
         [#\& (let ([entity (read-entity input)]) (loop items (cons entity chars)))]
         [else (loop items (cons ch chars))]))))
 
-(struct display-list (items width height font) #:transparent)
+(struct display-list (items width height) #:transparent)
 (struct layout-item (x y content font style) #:transparent)
 
 (struct layout-state (x y line items font styling dc width) #:transparent #:mutable)
@@ -237,16 +237,13 @@
   (for ((t tokens))
     (layout-token t state))
   (layout-flush state)
-  (display-list (layout-state-items state) width (layout-state-y state) font))
+  (display-list (layout-state-items state) width (layout-state-y state)))
 
-(define (draw displ dc offset)
+(define (draw displ dc top)
   (define vmax (display-list-height displ))
-  (define font (display-list-font displ))
   (define-values (w h) (send dc get-size))
-  (define top offset)
   (define items (display-list-items displ))
-  (send dc set-font font)
-  (for ((item items) (i (in-naturals)))
+  (for (((item i) (in-indexed items)))
     (match item
       ((layout-item x y (? string? str) f style)
        (cond
