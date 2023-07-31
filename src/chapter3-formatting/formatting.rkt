@@ -268,12 +268,17 @@
             (send canvas set-scroll-page 'vertical h)
             (draw displ dc (send canvas get-scroll-pos 'vertical)))))))
 
-(send canvas init-manual-scrollbars #f 1000 4 4 0 0)
+(when (> (vector-length (current-command-line-arguments)) 0)
+  (begin
+    (send canvas init-manual-scrollbars #f 1000 4 4 0 0)
+    (send browser show #t)
+    (define target (command-line #:args (uri) uri))
+    (send browser load target)))
 
-(send browser show #t)
+
 
 
 (define test-url "https://browser.engineering/examples/xiyouji.html")
 (define test-url2 "file:///D:/Niklas/src/browsereng/test/default.html")
 (define test-url3 "https://browser.engineering/")
-(send browser load test-url2)
+
