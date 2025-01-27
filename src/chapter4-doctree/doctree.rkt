@@ -19,24 +19,26 @@
 
 (define attr-regex #px"(\\w+)(=('(([^']|\\\\.)*)'|\"(([^\"]|\\\\.)*)\"|(\\w+)))*")
 
+
+;; TODO: use reencode-ports for converting text encodings
 (define (parse body)
   (define state (parser body '()))
-  (define txt '())
+  (define txt (open-output-bytes))
   (define (get-txt)
-    (let ((str (list->string (reverse txt))))
-      (set! txt '())
-      str))
+    (bytes->string/utf-8 (get-output-bytes txt #t)))
+  (define (inner-text)
+    (let ((t (get-txt)))
+             (when (non-empty-string? (string-trim t))
+              (add-text state t))))
   (define in-tag? #f)
   (for ((c body))
     (match c 
       (#\< (set! in-tag? #t)
-           (unless (null? txt)
-              (add-text state (get-txt))))
+           (inner-text))
       (#\> (set! in-tag? #f)
            (add-tag state (get-txt)))
-      (else (set! txt (cons c txt)))))
-  (unless (null? txt)
-    (add-text state (get-txt)))
+      (_ (write-char c txt))))
+  (inner-text)
   (finish state))
 
 (define (add-tag state str)
@@ -46,9 +48,10 @@
     ((string-prefix? tag "/")
        (match unfinished
          ((list el rest ..1)
+          (set-node-children! el (reverse (node-children el)))
           (set-node-children! (car rest) (cons el (node-children (car rest))))
           (set-parser-unfinished! state rest))
-         (else (void))))
+         (_ (void))))
     (else
       (let* ((parent (if (null? unfinished) #f (car unfinished)))
              (el (element '() parent tag attrs)))
@@ -69,7 +72,6 @@
       
 (define (finish state)
   (define (close parent child)
-    (printf "~a ~a" child parent)
     (when child
       (set-node-children! parent (cons child (node-children parent))))
     parent)
