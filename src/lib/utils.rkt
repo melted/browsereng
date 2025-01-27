@@ -6,7 +6,6 @@
          string-find
          string-cut)
 
-
 (define (read-until port end-char)
   (define str (open-output-string))
   (let loop ()
@@ -21,8 +20,8 @@
 
 (define (convert-entity entity)
   (cond
-    [(string-prefix? entity "#x") (integer->char (string->number (substring entity 2) 16))]
-    [(string-prefix? entity "#") (integer->char (string->number (substring entity 1)))]
+    [(string-prefix? entity "&#x") (integer->char (string->number (substring entity 2) 16))]
+    [(string-prefix? entity "&#") (integer->char (string->number (substring entity 1)))]
     [else (hash-ref named-entities entity entity)]))
 
 (define (read-entity port)
