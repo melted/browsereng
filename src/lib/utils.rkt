@@ -1,6 +1,10 @@
 #lang racket
 (require "entities.rkt")
-(provide read-until read-entity convert-entity string-find string-cut)
+(provide read-until
+         read-entity
+         convert-entity
+         string-find
+         string-cut)
 
 
 (define (read-until port end-char)
